@@ -1,3 +1,11 @@
+"""
+lm_scorer modules implements sentence scoring functions that aim to automatically evaluate 
+sentences' naturalness by taking advantage of state-of-the-art pretrained language models. 
+
+The module implements two versions : one using GPT2-based models and another one
+using BERT-based models.
+"""
+
 from abc import ABC, abstractmethod
 from typing import *
 
