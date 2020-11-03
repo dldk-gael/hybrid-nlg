@@ -42,9 +42,9 @@ class GrammarNode:
         return self.symbols[0]["str"] == "'DEAD_END'"
 
     @classmethod
-    def from_string(cls, grammar_as_str: str):
+    def rootnode_from_grammar(cls, grammar_as_str: str, start_symbol: str):
         grammar = parse_grammar(grammar_as_str)
-        return cls(({"str": "ROOT", "features": PStruct({})},), grammar)
+        return cls(({"str": start_symbol, "features": PStruct({})},), grammar)
 
     def children(self) -> List["GrammarNode"]:
         if not self._children:
@@ -121,6 +121,9 @@ class GrammarNode:
             return as_str
         else:  # for debug / illustration only
             return " ".join(map(str, self.symbols))
+
+    def __repr__(self):
+        return self.__str__()
 
     def estimate_mean_depth(self, nb_samples: int = 1) -> float:
         depths = []
