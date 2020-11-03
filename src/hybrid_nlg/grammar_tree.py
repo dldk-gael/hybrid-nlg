@@ -5,10 +5,11 @@ By simply overriding the compute_children method, it can interface with any kind
 
 from copy import deepcopy
 from typing import *
-import random 
+import random
 import numpy as np
 
 from .grammar import parse_grammar, PStruct, is_symbol_terminal, revert, copy_features
+
 
 class GrammarNode:
     """
@@ -18,7 +19,11 @@ class GrammarNode:
     Let M be another grammar node. M is a child of N if M represents the sequence of symbols 
     t1 ... tk d1 ... dj s1...sm and that there exists a production rule
     n -> d1 ... dj in the grammar 
+
+    Remark : if a node has only one single child, we will - by default - skip this child and 
+    directly return the grandchildren. This makes the MCTS more efficient. 
     """
+
     def __init__(self, symbols: tuple, grammar: Dict):
         self.symbols = symbols  # a symbol <- {"str": str, "features": PStruct | PVar | PConst}
         self.grammar = grammar
@@ -32,10 +37,12 @@ class GrammarNode:
     def children(self) -> List["GrammarNode"]:
         if not self._children:
             self._children = self.compute_children()
+            if (len(self._children) == 1) and (not self._children[0].is_terminal()):
+                self._children = self._children[0].children()
         return self._children
 
     def compute_children(self) -> List["GrammarNode"]:
-        # if a node has not any child, we return an empty list 
+        # if a node has not any child, we return an empty list
         child_nodes = []
 
         # Go from left to right to the first non terminal symbol
@@ -54,7 +61,7 @@ class GrammarNode:
 
         for body in bodies:
             # body <- {'head_feature':PStruct, 'body_features': List[PStruct], 'body_symbols': List[str]}
-            feature_copies = copy_features(body) # <- List[{'str': str, 'features': PStruct}]
+            feature_copies = copy_features(body)  # <- List[{'str': str, 'features': PStruct}]
 
             head_bindings = []
             if not symbol["features"].unify(feature_copies[0]["features"], head_bindings):
@@ -62,7 +69,9 @@ class GrammarNode:
                 continue
 
             new_node = GrammarNode(
-                symbols=deepcopy(self.symbols[:idx_left_nt_symb] + tuple(feature_copies[1:]) + self.symbols[idx_left_nt_symb + 1 :]),
+                symbols=deepcopy(
+                    self.symbols[:idx_left_nt_symb] + tuple(feature_copies[1:]) + self.symbols[idx_left_nt_symb + 1 :]
+                ),
                 grammar=self.grammar,
             )
             child_nodes.append(new_node)
@@ -76,22 +85,22 @@ class GrammarNode:
                 return False
         return True
 
-    def random_child(self) -> Union["GrammarNode", None]: 
+    def random_child(self) -> Union["GrammarNode", None]:
         _children = self.children()
-        return random.choice(_children) if len(_children) >= 0 else 0  
+        return random.choice(_children) if len(_children) >= 0 else 0
 
     def __str__(self) -> str:
         if self.is_terminal():
             as_str = ""
             for symbol in self.symbols:
-                if not len(symbol["str"]) == 2: # to remove the empty string : "" or ''
-                    str_symbol = symbol["str"][1:-1] # to remove " " from "word"
+                if not len(symbol["str"]) == 2:  # to remove the empty string : "" or ''
+                    str_symbol = symbol["str"][1:-1]  # to remove " " from "word"
                     if as_str != "":
                         as_str += " " + str_symbol
                     else:
                         as_str += str_symbol
             return as_str
-        else: # for debug / illustration only
+        else:  # for debug / illustration only
             return " ".join(map(str, self.symbols))
 
     def estimate_mean_depth(self, nb_samples: int = 1) -> float:
@@ -104,4 +113,3 @@ class GrammarNode:
                 depth += 1
             depths.append(depth)
         return np.mean(depths)
-    
