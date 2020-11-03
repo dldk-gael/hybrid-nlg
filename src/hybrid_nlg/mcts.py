@@ -35,13 +35,18 @@ class CounterNode:
         self.count = 0
         self.sum_rewards = 0
         self.sum_of_square_rewards = 0
-        self.top_reward = 0
+        self.top_reward = -1
 
         # Useful to analyse and debug MCTS
         self.top_leaf_node = None
 
         # If true -> prevent any backpropagation to the node's parent
         self.freeze = False
+
+        # A node is said to be solved either if its reference node is a terminal node
+        # or if all its children are completely solved.
+        # -> this means that the corresponding sub-part of the tree has been already fully visited
+        self.solved = False
 
     def expand(self):
         assert not self.reference_node.is_terminal(), "Try to expand from a terminal node"
@@ -79,6 +84,19 @@ class CounterNode:
         """
         assert not self.is_terminal(), "Try to access children of a terminal node :%s" % str(self.reference_node)
         return max(self.children(), key=lambda child: child.top_reward)
+
+    def set_as_solved(self):
+        """
+        Set the counter node as solved
+        If all his brothers are also solved, back-propagate the information to his parent
+        """
+        self.solved = True
+        if (self.parent is not None) and (not self.parent.freeze):
+            brothers = self.parent.children()
+            for brother in brothers:
+                if not brother.solved:
+                    return
+            self.parent.set_as_solved()
 
 
 class RessourceDistributor:
@@ -174,7 +192,6 @@ class EvalBuffer:
                 self.best_sentence = str(leaf)
 
         self.buffer = []
-        return self.pop_results()
 
     def pop_results(self):
         output = self.results
@@ -210,7 +227,11 @@ class MCTS:
         counter_root = CounterNode(reference_node=root, parent=None)
         current_depth = 1
 
-        while not counter_root.reference_node.is_terminal() and self.ressource_distributor.still_has_ressources():
+        while (
+            not counter_root.reference_node.is_terminal()
+            and not counter_root.solved
+            and self.ressource_distributor.still_has_ressources()
+        ):
             self.ressource_distributor.consume_one_unit()
 
             # The classic steps of MCTS:
@@ -218,15 +239,17 @@ class MCTS:
             frontier_counter_node = self.selection_phase(counter_root)
 
             # 2. expansion
-            frontier_counter_node.expand()
+            if frontier_counter_node.reference_node.is_terminal():
+                # backpropagate the information to the parent in order to avoid selecting this node in the futur
+                frontier_counter_node.set_as_solved()
+            else:
+                frontier_counter_node.expand()
 
-            # 3. simulation
-            n = frontier_counter_node.reference_node
-            while n.is_terminal():
-                n = n.random_child()
-                if not n:  # can occur when a node has no child while being nonterminal -> dead-end branch
-                    break
-            random_leaf = n
+            # 3. simuation
+            tmp_node = frontier_counter_node.reference_node
+            while not tmp_node.is_terminal():
+                tmp_node = tmp_node.random_child()
+            random_leaf = tmp_node
 
             # 4. evaluation
             # contrary to vanilla MCTS, we use a buffer system for evaluation
@@ -242,7 +265,8 @@ class MCTS:
             # to perform the tree walks from current root or if we should go down to the best child
             if self.ressource_distributor.should_go_down_into_the_tree():
                 # Force the evaluation of the leaves that still remain in the buffer
-                for reward, leaf, frontier_counter_node in self.eval_buffer.force_eval():
+                self.eval_buffer.force_eval()
+                for reward, leaf, frontier_counter_node in self.eval_buffer.pop_results():
                     frontier_counter_node.backpropagate(reward, leaf)
 
                 # Freeze current_root to avoid modifying the counter in futur backprops
@@ -255,7 +279,7 @@ class MCTS:
 
         self.eval_buffer.force_eval()
 
-    ### SELECTION PHASE ####
+    ### SELECTION PHASE ###
     # Go down to the frontier of the visited tree
     # by sucessively visiting the child that maximises the single player UCB
 
@@ -272,8 +296,9 @@ class MCTS:
         for child in counter_node.children():
             if child.count == 0:
                 return child
-        # else select the node that maximise the UCB
-        return max(counter_node.children(), key=lambda node: self.single_player_ucb(node, counter_node))
+        # else select the node that maximise the UCB among the nodes that have not been solved yet
+        unsolved_children = [children for children in counter_node.children() if not children.solved]
+        return max(unsolved_children, key=lambda node: self.single_player_ucb(node, counter_node))
 
     @staticmethod
     def single_player_ucb(child: CounterNode, parent: CounterNode, c=1, d=100) -> float:
@@ -289,3 +314,4 @@ class MCTS:
                 / child.count
             )
         )
+
