@@ -171,13 +171,13 @@ class EvalBuffer:
 
         self.best_sentence = ""
         self.best_score = -1
+        self.score_history = [] # to check score distribution 
 
     def add(self, frontier_counter_node: CounterNode, leaf: GrammarNode):
         if leaf.is_dead_end():  # case of dead-end branches
             self.results.append((0, leaf, frontier_counter_node))
         else:
             self.buffer.append((leaf, frontier_counter_node))
-
         if len(self.buffer) == self.buffer_size:
             self.force_eval()
 
@@ -186,6 +186,7 @@ class EvalBuffer:
             return []
 
         scores = self.lm_scorer.compute_score([str(grammar_leaf) for (grammar_leaf, _) in self.buffer])
+        self.score_history.append(scores)
 
         for score, (leaf, frontier_counter_node) in zip(scores, self.buffer):
             self.results.append((score, leaf, frontier_counter_node))
