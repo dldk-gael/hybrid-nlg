@@ -186,7 +186,7 @@ class EvalBuffer:
             return []
 
         scores = self.lm_scorer.compute_score([str(grammar_leaf) for (grammar_leaf, _) in self.buffer])
-        self.score_history.append(scores)
+        self.score_history += scores
 
         for score, (leaf, frontier_counter_node) in zip(scores, self.buffer):
             self.results.append((score, leaf, frontier_counter_node))
