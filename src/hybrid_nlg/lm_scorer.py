@@ -1,5 +1,5 @@
 """
-lm_scorer modules implements sentence scoring functions that aim to automatically evaluate 
+lm_scorer module implements sentence scoring functions that aim to automatically evaluate 
 sentences' naturalness by taking advantage of state-of-the-art pretrained language models. 
 
 The module implements two versions : one using GPT2-based models and another one
@@ -8,6 +8,7 @@ using BERT-based models.
 
 from abc import ABC, abstractmethod
 from typing import *
+import math 
 
 import torch
 from transformers import AutoTokenizer, AutoModelWithLMHead
@@ -20,15 +21,23 @@ class SentenceScore(ABC):
     Each class that inherits from SentenceScore will use a particular transformer-based models
     to associate the naturalness of a sentence given some previous context :
     --> naturalness(sentence | context)
-    Typically a scorer based on current state-of-the-art language models works as follows :
+
+    Typically, a scorer based on current state-of-the-art language models works as follows :
     1/ Tokenize the sentence
     2/ Compute the probability of each sentence's tokens for the language model
     3/ Aggregate and normalize tokens' scores
 
-    This class aims to implement various functions common to all lm-based scoring functions
+    This class implements various functions common to all lm-based scoring functions
     """
 
     def __init__(self, model_name: str = "gpt2", batch_size: int = 1, device: str = None, normalization_strategy="LP"):
+        """
+        - model_name : name of the pretrained model. 
+            List of available huggingface's model is detailed here : https://huggingface.co/transformers/pretrained_models.html
+        - batch_size : maximum number of sentences to input in one single pass into the model 
+        - device : where to load the model (GPU, CPU, etc)
+        - normalization_strategy : how to aggregate the tokens' scores (LP -> sum of log prob, or MeanLP -> average of log prob)
+        """
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         self.model = AutoModelWithLMHead.from_pretrained(model_name)
         self.device = device if device else ("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -57,6 +66,7 @@ class SentenceScore(ABC):
         if self.normalization_strategy == "MeanLP":
             scores = [score / len(encodings.tokens(i)) for (i, score) in enumerate(scores)]
 
+        scores = [math.exp(score) for score in scores] # All previous computations were performed in log-space
         return scores[0] if isinstance(text, str) else scores
 
     @abstractmethod
@@ -65,17 +75,18 @@ class SentenceScore(ABC):
         Given a list of tokenized and encoded sentences
         return the list of log probability of each sentences for the language model
         """
+        # Need to be implement for each type of language model (Causal LM, Mask LM, ...)
         ...
 
     @staticmethod
     def _pad(sequences: List[torch.Tensor], pad_token_id) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        rewrite torch.nn.utils.rnn.pad_sequence so that it return a boolean mask of pad position
-        the advantage is that we can avoid to add custom pad token to the model and pad directly
-        with any token we want
+        Rewrite torch.nn.utils.rnn.pad_sequence so that it returnz a boolean mask of pad positions.
+        The goal is to avoid adding custom pad tokens to the model and pad directy with any token we want
+        because we will be able to remove later the score of this token; 
         """
         max_seq_len = max([s.size(0) for s in sequences])
-        out_tensor = sequences[0].data.new(len(sequences), max_seq_len).fill_(pad_token_id)  # type:ignore
+        out_tensor = sequences[0].data.new(len(sequences), max_seq_len).fill_(pad_token_id)  
         mask = torch.zeros((len(sequences), max_seq_len), device=sequences[0].device)
         for i, tensor in enumerate(sequences):
             length = tensor.size(0)
@@ -92,12 +103,11 @@ class GPT2Score(SentenceScore):
     """
 
     def _transformer_log_prob(self, sentences_token_ids: List[List[int]]) -> List[float]:
+        # Split the sentences into batch of batch_size 
         log_prob_scores = []
-
         for i in range(0, len(sentences_token_ids), self.batch_size):
             batch = sentences_token_ids[i : i + self.batch_size]
             log_prob_scores += self._compute_single_batch(batch)
-
         return log_prob_scores
 
     def _compute_single_batch(self, sentences_token_ids: List[List[int]]) -> List[float]:
@@ -107,14 +117,14 @@ class GPT2Score(SentenceScore):
             for sentence_token_ids in sentences_token_ids
         ]
 
+        # Construct the input tensor 
         input_ids, no_pad_mask = self._pad(
             sequences=list(map(lambda ids: torch.tensor(ids, device=self.device), tokens_ids)),
             pad_token_id=self.tokenizer.eos_token_id,
         )
 
         with torch.no_grad():
-            # shape = [batch_size, seq_len, vocab_size]
-            pred_logits = self.model(input_ids)[0]
+            pred_logits = self.model(input_ids)[0] # shape = [batch_size, seq_len, vocab_size]
             pred_scores = torch.nn.LogSoftmax(dim=2)(pred_logits)
 
             # Align input and target
@@ -127,16 +137,16 @@ class GPT2Score(SentenceScore):
             # Zeros the score of pad tokens
             tokens_scores *= no_pad_mask[:, 1:]
 
-        # Return the sum of tokens scores without taking into account the score of context tokens
+        # Return the sum of tokens scores without taking into account the scores of the context tokens
         return torch.sum(tokens_scores[:, len(self.context_ids) :], dim=1).tolist()
 
 
 class BERTScore(SentenceScore):
     """
     Compute the score of a sentence given a BERT-based model.
-    1- mask successively each word of the sentences
+    1- mask successively each word of the sentence to score 
         For instance, if the context is "Where is Gael ?" and the sentence to score is "He has left"
-        We will create the following mask sentences
+        It will create the following mask sentences : 
             - [CLS] Where is Gael ?  [MASK] has left [SEP]
             - [CLS] Where is Gael ? he [MASK] left [SEP]
             - [CLS] Where is Gael ?  he has [MASK] [SEP]
@@ -183,7 +193,7 @@ class BERTScore(SentenceScore):
                     + sentence_token_ids
                     + [self.tokenizer.sep_token_id]
                 )
-                # Replace token n°token_idx by [MASK] token
+                # replace token n°token_idx by [MASK] token
                 mask_sentence_token_ids[1 + len_context + token_idx] = self.tokenizer.mask_token_id
 
                 full_mask_batch.append(
@@ -216,9 +226,10 @@ class BERTScore(SentenceScore):
         with torch.no_grad():
             # contrary to GPT2-based score, we have to provide an attention mask
             # because BERT will also look on the right side and will see the pad tokens
-            # thanks to no_pad_mask, the model will zero the score of pad tokens at each layer
+            # by providing no_pad_mask as the attention mask, the model will zero the
+            # attention scores of the pad tokens at each layer
 
-            # shape = [batch_size, seq_len, vocab_size]
+            # logits.shape = [batch_size, seq_len, vocab_size]
             logits = self.model(input_ids, attention_mask=no_pad_mask)[0]
 
             # Retrieve the logits of mask tokens
@@ -227,7 +238,7 @@ class BERTScore(SentenceScore):
 
             # target_score.shape = [batch_size,]
             target_scores = mask_pred_logits[range(batch_size), dict_batch["mask_target"]]
-            target_log_probs = target_scores - mask_pred_logits.logsumexp(dim=1)
+            target_log_probs = target_scores - mask_pred_logits.logsumexp(dim=1) # from logits to log probs 
 
         return target_log_probs
 
