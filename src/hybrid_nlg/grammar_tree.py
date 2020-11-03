@@ -4,6 +4,7 @@ By simply overriding the compute_children method, it can interface with any kind
 """
 
 from copy import deepcopy
+from typing import *
 import random 
 import numpy as np
 
@@ -18,22 +19,22 @@ class GrammarNode:
     t1 ... tk d1 ... dj s1...sm and that there exists a production rule
     n -> d1 ... dj in the grammar 
     """
-    def __init__(self, symbols: tuple, grammar):
+    def __init__(self, symbols: tuple, grammar: Dict):
         self.symbols = symbols  # a symbol <- {"str": str, "features": PStruct | PVar | PConst}
         self.grammar = grammar
         self._children = None
 
     @classmethod
-    def from_string(cls, grammar_as_str):
+    def from_string(cls, grammar_as_str: str):
         grammar = parse_grammar(grammar_as_str)
         return cls(({"str": "ROOT", "features": PStruct({})},), grammar)
 
-    def children(self):
+    def children(self) -> List["GrammarNode"]:
         if not self._children:
             self._children = self.compute_children()
         return self._children
 
-    def compute_children(self):
+    def compute_children(self) -> List["GrammarNode"]:
         # if a node has not any child, we return an empty list 
         child_nodes = []
 
@@ -69,17 +70,17 @@ class GrammarNode:
 
         return child_nodes
 
-    def is_terminal(self):
+    def is_terminal(self) -> bool:
         for symbol in self.symbols:
             if not is_symbol_terminal(symbol):
                 return False
         return True
 
-    def random_child(self): 
+    def random_child(self) -> Union["GrammarNode", None]: 
         _children = self.children()
         return random.choice(_children) if len(_children) >= 0 else 0  
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.is_terminal():
             as_str = ""
             for symbol in self.symbols:
@@ -93,7 +94,7 @@ class GrammarNode:
         else: # for debug / illustration only
             return " ".join(map(str, self.symbols))
 
-    def estimate_mean_depth(self, nb_samples: int = 1):
+    def estimate_mean_depth(self, nb_samples: int = 1) -> float:
         depths = []
         for _ in range(nb_samples):
             depth = 1  # by default root's depth = 1 (and not 0)
