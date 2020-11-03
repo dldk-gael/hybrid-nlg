@@ -87,15 +87,16 @@ class RessourceDistributor:
     ALL_FROM_ROOT: compute all the tree walks from the tree root
     UNIFORM: the same amount of tree walks will be performed from each depth
     """
+
     # Other implementation (LINEAR, DYNAMIC, ...) are possible but not detailed here
 
     def __init__(self, strategy: str, tree_root: GrammarNode, ressources: int):
-        strategy = strategy if strategy else "ALL_FROM_ROOT"
+        self.strategy = strategy if strategy else "ALL_FROM_ROOT"
         self.ressources_to_consume = ressources
 
-        if strategy == "ALL_FROM_ROOT":
+        if self.strategy == "ALL_FROM_ROOT":
             self.ressources_to_consume_at_current_depth = self.ressources_to_consume
-        elif strategy == "UNIFORM":
+        elif self.strategy == "UNIFORM":
             average_depth = tree_root.estimate_mean_depth(nb_samples=50)
             # Factor 1.2 in order to consume all the computational ressources before getting to the bottom of the tree
             self.ressources_to_consume_at_current_depth = self.ressources_to_consume / average_depth * 1.2
@@ -103,7 +104,7 @@ class RessourceDistributor:
         self.reset()
 
     def set_new_position(self, depth):
-        self.current_depth = current_depth
+        self.current_depth = depth
         self.ressources_already_consumed_at_current_depth = 0
 
     def consume_one_unit(self):
@@ -114,7 +115,10 @@ class RessourceDistributor:
         return self.ressources_already_consumed < self.ressources_to_consume
 
     def should_go_down_into_the_tree(self):
-        return self.ressources_already_consumed_at_current_depth >= self.ressources_to_consume_at_current_depth
+        if self.strategy == "ALL_FROM_ROOT":
+            return False
+        else:
+            return self.ressources_already_consumed_at_current_depth >= self.ressources_to_consume_at_current_depth
 
     def reset(self):
         self.current_depth = 1
@@ -126,10 +130,15 @@ class EvalBuffer:
     """
     The evaluation buffer store the leaves in memory until it is full. 
     Then, the leaves are sent to the LM-based scorer in one single batch. 
+    
+    Remark : in the following MCTS implementation, it is possible that the 
+    random simulations will lead to dead-end branches. In such cases, we will, 
+    by default, associate a zero reward to those leaves. 
     """
+
     # This is a vanilla implementation of the evaluation buffer,
     # it does not take advantage of parallelization or memoization
-    # but those possible optimization can be simply implemented by 
+    # but those possible optimization can be simply implemented by
     # overiding some of the following methods.
 
     def __init__(
@@ -144,8 +153,8 @@ class EvalBuffer:
         self.best_score = -1
 
     def add(self, frontier_counter_node: CounterNode, leaf: GrammarNode):
-        if not leaf:  # case of dead-end branches
-            self.results.append((0, None, frontier_counter_node))
+        if leaf.is_dead_end():  # case of dead-end branches
+            self.results.append((0, leaf, frontier_counter_node))
         else:
             self.buffer.append((leaf, frontier_counter_node))
 
@@ -215,15 +224,15 @@ class MCTS:
             n = frontier_counter_node.reference_node
             while n.is_terminal():
                 n = n.random_child()
-                if not n : # can occur when a node has no child while being nonterminal -> dead-end branch
-                    break 
+                if not n:  # can occur when a node has no child while being nonterminal -> dead-end branch
+                    break
             random_leaf = n
 
             # 4. evaluation
             # contrary to vanilla MCTS, we use a buffer system for evaluation
             self.eval_buffer.add(frontier_counter_node, random_leaf)
-            results = self.eval_buffer.pop_results() 
-            # most of the time, results is an empty list because the buffer is only evaluated when full 
+            results = self.eval_buffer.pop_results()
+            # most of the time, results is an empty list because the buffer is only evaluated when full
 
             # 5. backpropagation (every buffer_size nb of steps)
             for reward, leaf, frontier_counter_node in results:

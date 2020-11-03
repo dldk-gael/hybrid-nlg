@@ -20,14 +20,26 @@ class GrammarNode:
     t1 ... tk d1 ... dj s1...sm and that there exists a production rule
     n -> d1 ... dj in the grammar 
 
-    Remark : if a node has only one single child, we will - by default - skip this child and 
+    Remarks : 
+    1- if a node has only one single child, we will - by default - skip this child and 
     directly return the grandchildren. This makes the MCTS more efficient. 
+
+    2- if a node represents a sequence that has at least one non-terminal symbol, but that 
+    this node has not any child (= dead-end branch), we artificially construct a special dead-end node
+    and make it a child of this node; 
     """
 
     def __init__(self, symbols: tuple, grammar: Dict):
         self.symbols = symbols  # a symbol <- {"str": str, "features": PStruct | PVar | PConst}
         self.grammar = grammar
         self._children = None
+        self._is_terminal = None 
+
+    def dead_end_node(self):
+        return GrammarNode(({"str": "'DEAD_END'", "features": PStruct({})},), self.grammar)
+
+    def is_dead_end(self):
+        return self.symbols[0]["str"] == "'DEAD_END'"
 
     @classmethod
     def from_string(cls, grammar_as_str: str):
@@ -42,7 +54,9 @@ class GrammarNode:
         return self._children
 
     def compute_children(self) -> List["GrammarNode"]:
-        # if a node has not any child, we return an empty list
+        if self.is_terminal() :
+            return []
+
         child_nodes = []
 
         # Go from left to right to the first non terminal symbol
@@ -57,7 +71,7 @@ class GrammarNode:
 
         if not bodies:
             # Error in grammar -> miss a non terminal symbol
-            return [GrammarNode(({"str": "DEAD_END", "features": PStruct({})},), self.grammar)]
+            return [self.dead_end_node()]
 
         for body in bodies:
             # body <- {'head_feature':PStruct, 'body_features': List[PStruct], 'body_symbols': List[str]}
@@ -77,13 +91,18 @@ class GrammarNode:
             child_nodes.append(new_node)
             revert(head_bindings)
 
-        return child_nodes
+        return child_nodes if len(child_nodes) > 0 else [self.dead_end_node()]
 
     def is_terminal(self) -> bool:
-        for symbol in self.symbols:
-            if not is_symbol_terminal(symbol):
-                return False
-        return True
+        # in the sense the node represents a sequence composed of only terminal symbols
+        # not in the sense this node does not have any child 
+        if self._is_terminal is None:   
+            self._is_terminal = True
+            for symbol in self.symbols:
+                if not is_symbol_terminal(symbol):
+                    self._is_terminal = False
+                    break
+        return self._is_terminal
 
     def random_child(self) -> Union["GrammarNode", None]:
         _children = self.children()
