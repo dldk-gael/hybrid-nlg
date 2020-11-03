@@ -1,5 +1,5 @@
 """
-grammar module implements basic functions and structures to handle feature-based grammar
+grammar module implements basic functions and structures to handle feature-based grammars
 (code from Bas)
 """
 
