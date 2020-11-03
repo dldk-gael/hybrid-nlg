@@ -2,7 +2,7 @@ from hybrid_nlg import GPT2Score, BERTScore
 
 ##### GPT2 Score #####
 print("Initialize and load in memory the gpt2-based sentence scorer")
-gpt2_scorer = GPT2Score(model_name="gpt2", batch_size=2)
+gpt2_scorer = GPT2Score(model_name="gpt2", batch_size=2, normalization_strategy="MeanLP")
 
 print("Compute sentence scores")
 gpt2_scorer.set_context("Does Bas know Gael ?")
@@ -15,7 +15,7 @@ for sentence, score in zip(sentences, scores):
 
 ##### BERT Score #####
 print("Initialize and load in memory the bert-based sentence scorer")
-bert_score = BERTScore(model_name="bert-base-uncased", batch_size=1)
+bert_score = BERTScore(model_name="bert-base-uncased", batch_size=1, normalization_strategy="MeanLP")
 
 sentences = [
     "He knows Gael.",
