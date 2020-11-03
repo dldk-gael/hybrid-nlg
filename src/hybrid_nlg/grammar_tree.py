@@ -1,3 +1,8 @@
+"""
+grammar_tree module implements tree structure for grammar.
+By simply overriding the compute_children method, it can interface with any kind of grammar implementation. 
+"""
+
 from copy import deepcopy
 import random 
 import numpy as np
@@ -29,6 +34,7 @@ class GrammarNode:
         return self._children
 
     def compute_children(self):
+        # if a node has not any child, we return an empty list 
         child_nodes = []
 
         # Go from left to right to the first non terminal symbol
@@ -69,11 +75,15 @@ class GrammarNode:
                 return False
         return True
 
+    def random_child(self): 
+        _children = self.children()
+        return random.choice(_children) if len(_children) >= 0 else 0  
+
     def __str__(self):
         if self.is_terminal():
             as_str = ""
             for symbol in self.symbols:
-                if not len(symbol["str"]) == 2: # to remove "" or ''
+                if not len(symbol["str"]) == 2: # to remove the empty string : "" or ''
                     str_symbol = symbol["str"][1:-1] # to remove " " from "word"
                     if as_str != "":
                         as_str += " " + str_symbol
@@ -86,10 +96,10 @@ class GrammarNode:
     def estimate_mean_depth(self, nb_samples: int = 1):
         depths = []
         for _ in range(nb_samples):
-            depth = 1  # by choice root's depth = 1 (and not 0)
+            depth = 1  # by default root's depth = 1 (and not 0)
             node = self
-            while not node.is_terminal():
-                node = random.choice(self.children())
+            while node and not node.is_terminal():
+                node = node.random_child()
                 depth += 1
             depths.append(depth)
         return np.mean(depths)
