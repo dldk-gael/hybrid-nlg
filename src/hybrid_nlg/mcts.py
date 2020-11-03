@@ -98,6 +98,8 @@ class CounterNode:
                     return
             self.parent.set_as_solved()
 
+    def __repr__(self):
+        return self.reference_node.__repr__()
 
 class RessourceDistributor:
     """
