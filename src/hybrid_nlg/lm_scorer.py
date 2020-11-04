@@ -8,11 +8,12 @@ using BERT-based models.
 
 from abc import ABC, abstractmethod
 from typing import *
-import math 
+import math
 
 import torch
 from transformers import AutoTokenizer, AutoModelWithLMHead
 import numpy as np
+
 
 class SentenceScore(ABC):
     """
@@ -33,7 +34,7 @@ class SentenceScore(ABC):
     def __init__(self, model_name: str = "gpt2", batch_size: int = 1, device: str = None, normalization_strategy="LP"):
         """
         - model_name : name of the pretrained model. 
-            List of available huggingface's model is detailed here : https://huggingface.co/transformers/pretrained_models.html
+            List of available huggingface's model detailed here : https://huggingface.co/transformers/pretrained_models.html
         - batch_size : maximum number of sentences to input in one single pass into the model 
         - device : where to load the model (GPU, CPU, etc)
         - normalization_strategy : how to aggregate the tokens' scores (LP -> sum of log prob, or MeanLP -> average of log prob)
@@ -66,7 +67,7 @@ class SentenceScore(ABC):
         if self.normalization_strategy == "MeanLP":
             scores = [score / len(encodings.tokens(i)) for (i, score) in enumerate(scores)]
 
-        scores = [math.exp(score) for score in scores] # All previous computations were performed in log-space
+        scores = [math.exp(score) for score in scores]  # All previous computations were performed in log-space
         return scores[0] if isinstance(text, str) else scores
 
     @abstractmethod
@@ -81,18 +82,17 @@ class SentenceScore(ABC):
     @staticmethod
     def _pad(sequences: List[torch.Tensor], pad_token_id) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Rewrite torch.nn.utils.rnn.pad_sequence so that it returnz a boolean mask of pad positions.
-        The goal is to avoid adding custom pad tokens to the model and pad directy with any token we want
-        because we will be able to remove later the score of this token; 
+        Rewrite torch.nn.utils.rnn.pad_sequence so that it returns a boolean mask of pad positions.
+        The goal is to avoid having to add custom pad tokens to the model and be able to directy pad 
+        with any token we want because we still will be able to remove later the score of those tokens.
         """
         max_seq_len = max([s.size(0) for s in sequences])
-        out_tensor = sequences[0].data.new(len(sequences), max_seq_len).fill_(pad_token_id)  
+        out_tensor = sequences[0].data.new(len(sequences), max_seq_len).fill_(pad_token_id)
         mask = torch.zeros((len(sequences), max_seq_len), device=sequences[0].device)
         for i, tensor in enumerate(sequences):
             length = tensor.size(0)
             out_tensor[i, :length] = tensor
             mask[i, :length] = 1
-
         return out_tensor, mask
 
 
@@ -103,7 +103,7 @@ class GPT2Score(SentenceScore):
     """
 
     def _transformer_log_prob(self, sentences_token_ids: List[List[int]]) -> List[float]:
-        # Split the sentences into batch of batch_size 
+        # Split the sentences into batch of batch_size
         log_prob_scores = []
         for i in range(0, len(sentences_token_ids), self.batch_size):
             batch = sentences_token_ids[i : i + self.batch_size]
@@ -111,20 +111,20 @@ class GPT2Score(SentenceScore):
         return log_prob_scores
 
     def _compute_single_batch(self, sentences_token_ids: List[List[int]]) -> List[float]:
-        # Preprend the context before the sentences to score and add bos special token 
+        # Preprend the context before the sentences to score and add bos special token
         tokens_ids = [
             [self.tokenizer.bos_token_id] + self.context_ids + sentence_token_ids
             for sentence_token_ids in sentences_token_ids
         ]
 
-        # Construct the input tensor 
+        # Construct the input tensor
         input_ids, no_pad_mask = self._pad(
             sequences=list(map(lambda ids: torch.tensor(ids, device=self.device), tokens_ids)),
             pad_token_id=self.tokenizer.eos_token_id,
         )
 
         with torch.no_grad():
-            pred_logits = self.model(input_ids)[0] # shape = [batch_size, seq_len, vocab_size]
+            pred_logits = self.model(input_ids)[0]  # shape = [batch_size, seq_len, vocab_size]
             pred_scores = torch.nn.LogSoftmax(dim=2)(pred_logits)
 
             # Align input and target
@@ -238,7 +238,7 @@ class BERTScore(SentenceScore):
 
             # target_score.shape = [batch_size,]
             target_scores = mask_pred_logits[range(batch_size), dict_batch["mask_target"]]
-            target_log_probs = target_scores - mask_pred_logits.logsumexp(dim=1) # from logits to log probs 
+            target_log_probs = target_scores - mask_pred_logits.logsumexp(dim=1)  # from logits to log probs
 
         return target_log_probs
 
