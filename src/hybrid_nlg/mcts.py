@@ -75,7 +75,7 @@ class CounterNode:
 
         if self.parent is not None:
             self.parent.backpropagate(new_reward, leaf)
-            
+
     def set_as_solved(self):
         """
         Set the counter node as solved
@@ -212,12 +212,14 @@ class MCTS:
 
         for i in range(self.nb_random_restarts):
             self.ressource_distributor.reset()
-            self.single_search(root)
+            counter_root = self.single_search(root)
 
-        return self.eval_buffer.best_sentence, self.eval_buffer.best_score
+        # we return the counter root of the last search just for debug / analysis purpose 
+        return self.eval_buffer.best_sentence, self.eval_buffer.best_score, counter_root
 
     def single_search(self, root: GrammarNode):
-        counter_root = CounterNode(reference_node=root, parent=None)
+        initial_counter_root = CounterNode(reference_node=root, parent=None)
+        counter_root = initial_counter_root
         current_depth = 1
 
         while (
@@ -271,6 +273,7 @@ class MCTS:
                 self.ressource_distributor.set_new_position(current_depth)
 
         self.eval_buffer.force_eval()
+        return initial_counter_root # just for debug 
 
     ### SELECTION PHASE ###
     # Go down to the frontier of the visited tree
