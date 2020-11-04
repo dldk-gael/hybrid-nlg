@@ -1,6 +1,7 @@
 """
 grammar_tree module implements tree structure for grammar.
-By simply overriding the compute_children method, it can interface with any kind of grammar implementation. 
+By simply overriding the compute_children method, it can be used to interface 
+various kind of grammar implementation. 
 """
 
 from copy import deepcopy
@@ -17,12 +18,12 @@ class GrammarNode:
     t1 ... tk n s1...sm where n represents the leftest non-terminal symbol
 
     Let M be another grammar node. M is a child of N if M represents the sequence of symbols 
-    t1 ... tk d1 ... dj s1...sm and that there exists a production rule
-    n -> d1 ... dj in the grammar 
+    t1 ... tk d1 ... dj s1...sm and that there exists, in the grammar, a production rule
+    n -> d1 ... dj 
 
     Remarks : 
     1- if a node has only one single child, we will - by default - skip this child and 
-    directly return the grandchildren. This makes the MCTS more efficient. 
+    directly return the grandchildren. This makes the MCTS run more efficiently. 
 
     2- if a node represents a sequence that has at least one non-terminal symbol, but that 
     this node has not any child (= dead-end branch), we artificially construct a special dead-end node
@@ -106,7 +107,7 @@ class GrammarNode:
 
     def random_child(self) -> Union["GrammarNode", None]:
         _children = self.children()
-        return random.choice(_children) if len(_children) >= 0 else 0
+        return random.choice(_children) if len(_children) >= 0 else None
 
     def __str__(self) -> str:
         if self.is_terminal():
