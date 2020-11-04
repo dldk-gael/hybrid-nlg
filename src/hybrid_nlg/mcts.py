@@ -2,8 +2,9 @@
 mcts module implement Monte Carlo Tree Search algorithm for grammar search. 
 It defines 4 classes : 
 - CounterNode -> node wrapper that maintains statistics on the visited part of the tree 
-- EvalBuffer -> buffer system use to score the sentences by batch and not one by one 
-- ResssourceDistributor -> handle the division of the computationnal ressource 
+- EvalBuffer -> buffer system used to score the sentences by batch and not one by one 
+- ResssourceDistributor -> handle the division of the computationnal ressource and allow the 
+    implementation of various strategies to quickly go deeper into the tree 
 - MCTS -> implement the classical MCTS steps : selection, expansion, simulation, backpropagation 
 """
 
@@ -24,7 +25,7 @@ class CounterNode:
     - a reference to the leaf corresponding to this top reward 
 
     The counter node also keeps in memory a reference to his parent node in order to backpropagate
-    the information that it will recieve.
+    the information that it will receive.
     """
 
     def __init__(self, reference_node: GrammarNode, parent: "CounterNode" = None):
@@ -36,12 +37,8 @@ class CounterNode:
         self.sum_rewards = 0
         self.sum_of_square_rewards = 0
         self.top_reward = -1
-
-        # Useful to analyse and debug MCTS
-        self.top_leaf_node = None
-
-        # If true -> prevent any backpropagation to the node's parent
-        self.freeze = False
+        self.top_leaf_node = None  # Only needed to to analyse and debug MCTS
+        self.freeze = False  # If true -> prevent any backpropagation to the node's parent
 
         # A node is said to be solved either if its reference node is a terminal node
         # or if all its children are completely solved.
@@ -49,7 +46,7 @@ class CounterNode:
         self.solved = False
 
     def expand(self):
-        assert not self.reference_node.is_terminal(), "Try to expand from a terminal node"
+        assert not self.reference_node.is_terminal(), "Try to expand a terminal node"
         self._children = [CounterNode(child_node, parent=self) for child_node in self.reference_node.children()]
         self._is_terminal = False
 
@@ -58,6 +55,7 @@ class CounterNode:
         return self._children
 
     def is_terminal(self) -> bool:
+        # For counter node, terminal <=> not having any child
         return self._is_terminal
 
     def backpropagate(self, new_reward: float, leaf: GrammarNode):
@@ -77,14 +75,7 @@ class CounterNode:
 
         if self.parent is not None:
             self.parent.backpropagate(new_reward, leaf)
-
-    def top_child(self) -> "GrammarNode":
-        """
-        Return the child that has the best top_reward value
-        """
-        assert not self.is_terminal(), "Try to access children of a terminal node :%s" % str(self.reference_node)
-        return max(self.children(), key=lambda child: child.top_reward)
-
+            
     def set_as_solved(self):
         """
         Set the counter node as solved
@@ -100,6 +91,7 @@ class CounterNode:
 
     def __repr__(self):
         return self.reference_node.__repr__()
+
 
 class RessourceDistributor:
     """
@@ -148,22 +140,20 @@ class RessourceDistributor:
 
 class EvalBuffer:
     """
-    The evaluation buffer store the leaves in memory until it is full. 
+    The evaluation buffer stores the leaves in memory until it is full. 
     Then, the leaves are sent to the LM-based scorer in one single batch. 
     
     Remark : in the following MCTS implementation, it is possible that the 
-    random simulations will lead to dead-end branches. In such cases, we will, 
+    random simulations lead to dead-end branches. In such cases, we will, 
     by default, associate a zero reward to those leaves. 
     """
 
     # This is a vanilla implementation of the evaluation buffer,
     # it does not take advantage of parallelization or memoization
-    # but those possible optimization can be simply implemented by
+    # but those possible optimizations can be implemented by simply
     # overiding some of the following methods.
 
-    def __init__(
-        self, buffer_size: int, lm_scorer: SentenceScore,
-    ):
+    def __init__(self, buffer_size: int, lm_scorer: SentenceScore):
         self.lm_scorer = lm_scorer
         self.buffer_size = buffer_size
         self.buffer: List[Tuple[GrammarNode, CounterNode]] = []
@@ -171,7 +161,7 @@ class EvalBuffer:
 
         self.best_sentence = ""
         self.best_score = -1
-        self.score_history = [] # to check score distribution 
+        self.score_history = []  # to check score distributions
 
     def add(self, frontier_counter_node: CounterNode, leaf: GrammarNode):
         if leaf.is_dead_end():  # case of dead-end branches
@@ -210,11 +200,11 @@ class MCTS:
         buffer_size: int = 1,
         nb_random_restarts=1,
     ):
-        self.allocation_strategy = "ALL_FROM_ROOT"
+        self.allocation_strategy = allocation_strategy
         self.nb_random_restarts = nb_random_restarts
         self.eval_buffer = EvalBuffer(buffer_size, lm_scorer)
 
-    def search(self, root: GrammarNode, nb_of_tree_walks: int):
+    def search(self, root: GrammarNode, nb_of_tree_walks: int) -> Tuple[str, float]:
         nb_tree_walks_per_search = nb_of_tree_walks // self.nb_random_restarts
         self.ressource_distributor = RessourceDistributor(
             strategy=self.allocation_strategy, tree_root=root, ressources=nb_tree_walks_per_search
@@ -258,7 +248,7 @@ class MCTS:
             # contrary to vanilla MCTS, we use a buffer system for evaluation
             self.eval_buffer.add(frontier_counter_node, random_leaf)
             results = self.eval_buffer.pop_results()
-            # most of the time, results is an empty list because the buffer is only evaluated when full
+            # most of the time, results is an empty list because the buffer is only evaluated when it is full
 
             # 5. backpropagation (every buffer_size nb of steps)
             for reward, leaf, frontier_counter_node in results:
